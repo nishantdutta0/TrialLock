@@ -2,7 +2,21 @@ from triallock.config import VALIDATION_RULES
 
 def evaluate_rules(spark_df, entity, rules_config):
     issues = []
+    if rules_config is None:
+        return issues
+    # If no actual Spark DataFrame is provided, return configured rule notifications
+    # so that configured BLOCKER rules remain visible.
     if spark_df is None:
+        for rule in rules_config.get("rules", []):
+            if rule.get("entity") == entity:
+                issues.append({
+                    "rule_id": rule.get("rule_id"),
+                    "description": rule.get("description", ""),
+                    "severity": rule.get("severity", "LOW"),
+                    "entity": entity,
+                    "field": rule.get("field"),
+                    "message": f"Configured rule '{rule.get('rule_id')}' applies to {entity}; verify with actual data.",
+                })
         return issues
     for rule in rules_config.get("rules", []):
         if rule.get("entity") != entity:
