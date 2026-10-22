@@ -8,14 +8,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from triallock import config, synthetic_data, ingestion, pipeline, audit, metrics, readiness, storage, lineage, quality_rules
 
+BASE_DIR = Path(__file__).resolve().parent
+
 st.set_page_config(page_title="TrialLock", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
 [data-testid="stAppViewContainer"] { background-color: #f6f8fa; }
 [data-testid="stSidebar"] { background-color: #0a1f3c; }
-[data-testid="stSidebar"] h1 { color: white; }
-[data-testid="stSidebar"] p { color: #c8d1e0; }
+[data-testid="stSidebar"] h1 { color: white; font-size: 1.4rem; margin-bottom: 0.5rem; }
+[data-testid="stSidebar"] h2 { color: #b0bdd6; font-size: 1rem; margin-top: 1rem; }
+[data-testid="stSidebar"] p { color: #c8d1e0; font-size: 0.9rem; }
+[data-testid="stSidebar"] .stRadio > label { color: #e8edf3; font-weight: 500; }
+[data-testid="block-container"] { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+h1 { color: #0a1f3c; font-weight: 700; letter-spacing: -0.02em; }
+h2 { color: #11243d; font-weight: 600; margin-top: 1.5rem; }
+h3 { color: #1a2d4a; font-weight: 600; }
+.stButton > button { background-color: #0a1f3c; color: white; border-radius: 6px; padding: 0.5rem 1rem; border: none; }
+.stButton > button:hover { background-color: #14325e; }
+.stMetric { background-color: white; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 3px rgba(10,31,60,0.08); border-left: 4px solid #0a1f3c; }
+.stDataFrame { border-radius: 6px; box-shadow: 0 1px 2px rgba(10,31,60,0.06); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -81,6 +93,7 @@ elif page == "Data Ingestion":
             data = synthetic_data.generate_demo(config.STUDY_PROTOCOL["study_id"])
             st.success(f"Generated demo data: Subjects={data['meta']['subjects']}")
     elif method == "File Upload":
+        upload_entity = st.selectbox("Entity Type", ["subjects", "visits", "lab_results", "adverse_events", "pro_responses"], key="upload_entity")
         uploaded = st.file_uploader("Upload CSV/JSON", type=["csv", "json"])
         if uploaded:
             import hashlib
@@ -90,11 +103,11 @@ elif page == "Data Ingestion":
             # Save to bronze using ingestion module
             try:
                 ingestion.init_db()
-                ingestion.save_bronze(file_bytes, f"upload_{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')}", entity, uploaded.name)
+                ingestion.save_bronze(file_bytes, f"upload_{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')}", upload_entity, uploaded.name)
                 ingestion.record_ingestion({
                     "ingestion_id": f"upload_{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')}",
                     "study_id": config.STUDY_PROTOCOL.get("study_id", "IBD-DEMO-001"),
-                    "entity_type": entity,
+                    "entity_type": upload_entity,
                     "source_name": uploaded.name,
                     "source_type": "upload",
                     "ingestion_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -167,19 +180,18 @@ elif page == "Data Quality":
                         })
                 except Exception:
                     pass
-    # Add synthetic demonstration issues if none found
+    # Show real issues if available; otherwise show clear empty state
     if not issues:
-        issues = [
-            {"Rule ID": "MANDATORY_SUBJECT_ID", "Severity": "BLOCKER", "Entity": "subjects", "Message": "Missing subject identifier"},
-            {"Rule ID": "DUPLICATE_SUBJECT_KEY", "Severity": "BLOCKER", "Entity": "subjects", "Message": "Duplicate business key"},
-            {"Rule ID": "CONSENT_BEFORE_RANDOMIZATION", "Severity": "HIGH", "Entity": "subjects", "Message": "Consent after randomization"},
-            {"Rule ID": "LAB_NUMERIC_VALUE", "Severity": "BLOCKER", "Entity": "lab_results", "Message": "Result value is not numeric"},
-        ]
-    issues_df = pd.DataFrame(issues)
+        st.success("No data quality issues found in quarantine. If validation has not been executed, generate data and run the pipeline.")
+    issues_df = pd.DataFrame(issues) if issues else pd.DataFrame(columns=["Rule ID", "Severity", "Entity", "Message"])
     st.dataframe(issues_df)
-    score = latest.get("quality_score") if latest and latest.get("quality_score") else 92.0
-    st.metric("Quality Score", f"{score}%")
-    st.metric("Applicable Checks", f"{score} / 100 (demo estimate)")
+    score_display = latest.get("quality_score") if latest and latest.get("quality_score") is not None else None
+    if score_display is not None:
+        st.metric("Quality Score", f"{score_display}%")
+        st.metric("Applicable Checks (demo estimate)", "Calculated from pipeline results")
+    else:
+        st.metric("Quality Score", "Not evaluated")
+        st.info("No pipeline results available. Run the synthetic study and pipeline first.")
 
 elif page == "Lineage and Audit":
     st.title("Lineage and Audit")
