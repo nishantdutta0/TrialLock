@@ -1,5 +1,6 @@
 import random
 import datetime
+from pathlib import Path
 import pandas as pd
 import numpy as np
 
@@ -109,17 +110,21 @@ def generate_demo(study_id="IBD-DEMO-001"):
                 "response_value": str(random.randint(1, 5)),
                 "response_date": (datetime.date(2024, 1, 15) + datetime.timedelta(days=random.randint(0, 150))).strftime("%Y-%m-%d"),
             })
-    return {
-        "subjects": subjects,
-        "visits": visits,
-        "lab_results": labs,
-        "adverse_events": aes,
-        "pro_responses": pros,
-        "meta": {
-            "subjects": len(subjects),
-            "visits": len(visits),
-            "lab_results": len(labs),
-            "adverse_events": len(aes),
-            "pro_responses": len(pros),
-        },
+    meta = {
+        "subjects": len(subjects),
+        "visits": len(visits),
+        "lab_results": len(labs),
+        "adverse_events": len(aes),
+        "pro_responses": len(pros),
     }
+    import csv
+    bronze_dir = Path(__file__).resolve().parent.parent / "data" / "bronze"
+    bronze_dir.mkdir(parents=True, exist_ok=True)
+    for entity, records in [("subjects", subjects), ("visits", visits), ("lab_results", labs), ("adverse_events", aes), ("pro_responses", pros)]:
+        path = bronze_dir / f"{entity}_{study_id}.csv"
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=records[0].keys() if records else [])
+            writer.writeheader()
+            for r in records:
+                writer.writerow(r)
+    return {"subjects": subjects, "visits": visits, "lab_results": labs, "adverse_events": aes, "pro_responses": pros, "meta": meta}

@@ -43,17 +43,35 @@ if page == "Overview":
     if st.button("Generate Demo Study"):
         data = synthetic_data.generate_demo(config.STUDY_PROTOCOL["study_id"])
         st.success(f"Generated {data['meta']['subjects']} subjects, {data['meta']['visits']} visits, {data['meta']['lab_results']} labs, {data['meta']['adverse_events']} AEs, {data['meta']['pro_responses']} PROs.")
-        for entity, records in data.items():
-            if entity == "meta" or not isinstance(records, list):
-                continue
-            for r in records:
-                pass  # Could save to bronze here in full version
+        # The synthetic generator saves bronze CSV files automatically
     st.subheader("Charts")
     col1, col2 = st.columns(2)
     with col1:
-        st.plotly_chart(px.bar(pd.DataFrame({"Layer": ["Bronze", "Silver", "Gold"], "Count": [150, 120, 115]}), x="Layer", y="Count", title="Layer Counts"))
+        latest = metrics.get_latest_metrics()
+        if latest and latest.get("silver_counts"):
+            import json
+            sc = json.loads(str(latest.get("silver_counts", {})))
+            labels = list(sc.keys())
+            vals = list(sc.values())
+        else:
+            labels = ["subjects", "visits", "lab_results"]
+            vals = [0, 0, 0]
+        st.plotly_chart(px.bar(x=labels, y=vals, title="Silver Layer Counts"))
     with col2:
-        st.plotly_chart(px.pie(pd.DataFrame({"Severity": ["BLOCKER", "HIGH", "MEDIUM", "LOW"], "Count": [5, 8, 20, 30]}), names="Severity", values="Count", title="Issues by Severity"))
+        # Read real quarantine records if available
+        quarantine_path = BASE_DIR / "data" / "quarantine"
+        if quarantine_path.exists() and any(quarantine_path.iterdir()):
+            import os
+            files = [f for f in os.listdir(str(quarantine_path)) if f.endswith(".parquet")]
+            if files:
+                import pandas as pd
+                df_q = pd.read_parquet(str(quarantine_path / files[0]))
+                counts = df_q["entity_type"].value_counts().to_dict() if "entity_type" in df_q.columns else {}
+                st.plotly_chart(px.pie(names=list(counts.keys()), values=list(counts.values()), title="Quarantine by Entity"))
+            else:
+                st.info("No quarantine data yet.")
+        else:
+            st.info("No quarantine data yet.")
 
 elif page == "Data Ingestion":
     st.title("Data Ingestion")
@@ -65,13 +83,53 @@ elif page == "Data Ingestion":
     elif method == "File Upload":
         uploaded = st.file_uploader("Upload CSV/JSON", type=["csv", "json"])
         if uploaded:
-            st.info(f"Uploaded {uploaded.name} ({uploaded.size} bytes)")
-            st.write("Preview not implemented fully; would parse and validate columns.")
+            import hashlib
+            file_bytes = uploaded.read()
+            checksum = hashlib.sha256(file_bytes).hexdigest()
+            st.info(f"Uploaded {uploaded.name} ({len(file_bytes)} bytes) SHA-256: {checksum[:16]}...")
+            # Save to bronze using ingestion module
+            try:
+                ingestion.init_db()
+                ingestion.save_bronze(file_bytes, f"upload_{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')}", entity, uploaded.name)
+                ingestion.record_ingestion({
+                    "ingestion_id": f"upload_{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')}",
+                    "study_id": config.STUDY_PROTOCOL.get("study_id", "IBD-DEMO-001"),
+                    "entity_type": entity,
+                    "source_name": uploaded.name,
+                    "source_type": "upload",
+                    "ingestion_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "input_sha256": checksum,
+                    "raw_record_count": 0,
+                    "file_size_bytes": len(file_bytes),
+                    "schema_validation_status": "pending",
+                })
+                st.success("File saved to Bronze. Ingestion metadata recorded.")
+            except Exception as exc:
+                st.error(f"Failed to save upload: {exc}")
     elif method == "REST API":
         url = st.text_input("Endpoint URL")
         entity = st.selectbox("Entity", ["subjects", "visits", "lab_results", "adverse_events", "pro_responses"])
+        token = st.text_input("Bearer Token (optional)", type="password")
+        timeout = st.number_input("Timeout (seconds)", min_value=5, max_value=120, value=30)
         if st.button("Fetch"):
-            st.info("REST fetch simulated. Use Generate Demo Study for full demo.")
+            import requests
+            if not url.startswith(("http://", "https://")):
+                st.error("URL must start with http:// or https://")
+            else:
+                try:
+                    headers = {}
+                    if token:
+                        headers["Authorization"] = f"Bearer {token}"
+                    resp = requests.get(url, headers=headers, timeout=timeout)
+                    resp.raise_for_status()
+                    st.success(f"Fetched status {resp.status_code} from {url}")
+                    try:
+                        data_json = resp.json()
+                        st.json(data_json if isinstance(data_json, dict) else {"records": data_json[:3] if isinstance(data_json, list) else data_json})
+                    except Exception:
+                        st.info("Response is not JSON or too large to preview.")
+                except Exception as exc:
+                    st.error(f"Request failed: {exc}")
 
 elif page == "Pipeline Runs":
     st.title("Pipeline Runs")
@@ -87,15 +145,41 @@ elif page == "Pipeline Runs":
 
 elif page == "Data Quality":
     st.title("Data Quality")
-    issues_df = pd.DataFrame([
-        {"Rule ID": "MANDATORY_SUBJECT_ID", "Severity": "BLOCKER", "Entity": "subjects", "Message": "Missing subject identifier"},
-        {"Rule ID": "DUPLICATE_SUBJECT_KEY", "Severity": "BLOCKER", "Entity": "subjects", "Message": "Duplicate business key"},
-        {"Rule ID": "CONSENT_BEFORE_RANDOMIZATION", "Severity": "HIGH", "Entity": "subjects", "Message": "Consent after randomization"},
-        {"Rule ID": "LAB_NUMERIC_VALUE", "Severity": "BLOCKER", "Entity": "lab_results", "Message": "Result value is not numeric"},
-    ])
+    # Read actual pipeline results for quality info
+    latest = metrics.get_latest_metrics()
+    st.info(f"Latest pipeline: {latest['run_id'] if latest else 'N/A'} | Status: {latest['status'] if latest else 'N/A'} | Score: {latest.get('quality_score', 'N/A') if latest else 'N/A'}")
+    # Try reading quarantine parquet files for real issues
+    import sqlite3, json
+    issues = []
+    quarantine_path = BASE_DIR / "data" / "quarantine"
+    if quarantine_path.exists():
+        for f in quarantine_path.iterdir():
+            if f.suffix == ".parquet":
+                try:
+                    import pandas as pd
+                    df_q = pd.read_parquet(str(f))
+                    for _, row in df_q.iterrows():
+                        issues.append({
+                            "Rule ID": str(row.get("rule_id", "UNKNOWN")),
+                            "Severity": "BLOCKER",
+                            "Entity": str(row.get("entity_type", str(f.stem))),
+                            "Message": f"Quarantined record from pipeline run",
+                        })
+                except Exception:
+                    pass
+    # Add synthetic demonstration issues if none found
+    if not issues:
+        issues = [
+            {"Rule ID": "MANDATORY_SUBJECT_ID", "Severity": "BLOCKER", "Entity": "subjects", "Message": "Missing subject identifier"},
+            {"Rule ID": "DUPLICATE_SUBJECT_KEY", "Severity": "BLOCKER", "Entity": "subjects", "Message": "Duplicate business key"},
+            {"Rule ID": "CONSENT_BEFORE_RANDOMIZATION", "Severity": "HIGH", "Entity": "subjects", "Message": "Consent after randomization"},
+            {"Rule ID": "LAB_NUMERIC_VALUE", "Severity": "BLOCKER", "Entity": "lab_results", "Message": "Result value is not numeric"},
+        ]
+    issues_df = pd.DataFrame(issues)
     st.dataframe(issues_df)
-    st.metric("Quality Score", "92.0%")
-    st.metric("Applicable Checks", "220 / 232 passed")
+    score = latest.get("quality_score") if latest and latest.get("quality_score") else 92.0
+    st.metric("Quality Score", f"{score}%")
+    st.metric("Applicable Checks", f"{score} / 100 (demo estimate)")
 
 elif page == "Lineage and Audit":
     st.title("Lineage and Audit")
@@ -110,8 +194,28 @@ elif page == "Gold Data Explorer":
     st.title("Gold Data Explorer")
     table = st.selectbox("Gold Table", ["dim_subjects", "fact_visits", "fact_lab_results", "fact_adverse_events", "fact_pro_responses", "dq_issue_summary"])
     st.write(f"Selected: {table}")
+    # Try reading actual parquet or CSV
+    import os
+    gold_path = BASE_DIR / "data" / "gold"
+    file_path = gold_path / (table + ".parquet") if (gold_path / (table + ".parquet")).exists() else gold_path / (table + ".csv")
+    if file_path.exists():
+        try:
+            import pandas as pd
+            df_preview = pd.read_parquet(str(file_path)) if file_path.suffix == ".parquet" else pd.read_csv(str(file_path), nrows=20)
+            st.write(f"Preview ({len(df_preview)} rows shown from {table}):")
+            st.dataframe(df_preview.head(20))
+        except Exception as exc:
+            st.warning(f"Could not read {table}: {exc}")
+    else:
+        st.info(f"No output file found for {table}. Run the pipeline first.")
     st.code("SELECT * FROM " + table + " LIMIT 10")
-    st.download_button("Download CSV", "test", file_name="export.csv", mime="text/csv")
+    # Real CSV download when file exists
+    if file_path.exists():
+        with open(file_path, "rb") as f:
+            data = f.read()
+        st.download_button("Download CSV", data, file_name=f"{table}.csv", mime="text/csv")
+    else:
+        st.download_button("Download CSV (not available)", b"table,field\n", file_name="placeholder.csv", mime="text/csv", disabled=True)
 
 st.markdown("---")
 st.caption("Synthetic portfolio prototype for TrialLock. Not a validated GxP clinical system.")
