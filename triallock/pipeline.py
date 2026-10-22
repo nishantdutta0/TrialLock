@@ -26,16 +26,19 @@ def run_pipeline(study_id="IBD-DEMO-001"):
         quarantined_counts = {}
         gold_counts = {}
         total_issues = 0
+        from triallock import quality_rules, validation
 
         def safe_write(spark_df, output_path, mode="overwrite"):
             try:
                 spark_df.write.mode(mode).parquet(str(output_path))
-            except Exception:
+            except Exception as parquet_exc:
                 try:
                     spark_df.write.mode(mode).option("header", "true").csv(str(output_path))
-                except Exception:
-                    # If Spark output fails (e.g., missing HADOOP_HOME on Windows), skip writing but continue pipeline
-                    pass
+                except Exception as csv_exc:
+                    raise Exception(
+                        f"Failed to write output to {output_path}: parquet failed ({parquet_exc}), CSV fallback failed ({csv_exc}). "
+                        f"Check that HADOOP_HOME is set and output directory is writable."
+                    ) from csv_exc
         # Read bronze CSV files with Spark and process subjects
 
         # Process subjects (output already handled above with safe_write in the loop)
@@ -56,6 +59,10 @@ def run_pipeline(study_id="IBD-DEMO-001"):
             safe_write(df_sub, silver_dir / "subjects")
             clean_sub = df_sub.dropDuplicates(["study_id", "subject_id"])
             gold_counts["subjects"] = clean_sub.count()
+            # Execute configured validation rules against this entity
+            sub_issues = quality_rules.evaluate_rules(df_sub, "subjects", config.VALIDATION_RULES)
+            sub_validation = validation.validate_entity(df_sub, "subjects")
+            total_issues += len(sub_issues) if sub_issues else 0
             safe_write(clean_sub, gold_dir / "dim_subjects")
         else:
             silver_counts["subjects"] = 0
@@ -67,66 +74,74 @@ def run_pipeline(study_id="IBD-DEMO-001"):
         if visit_path.exists():
             df_vis = spark.read.option("header", "true").csv(str(visit_path))
             silver_counts["visits"] = df_vis.count()
+            visit_issues = quality_rules.evaluate_rules(df_vis, "visits", config.VALIDATION_RULES)
+            total_issues += len(visit_issues) if visit_issues else 0
             safe_write(df_vis, silver_dir / "visits")
             gold_counts["visits"] = df_vis.count()
             safe_write(df_vis, gold_dir / "fact_visits")
         else:
-            silver_counts["visits"] = 400  # approximate from synthetic
-            quarantined_counts["visits"] = 20
-            gold_counts["visits"] = 380
+            # No bronze input found - report explicitly rather than inventing counts
+            silver_counts["visits"] = 0
+            quarantined_counts["visits"] = 0
+            gold_counts["visits"] = 0
 
         # Lab results
         lab_path = bronze_path / f"lab_results_{study_id}.csv"
         if lab_path.exists():
             df_lab = spark.read.option("header", "true").csv(str(lab_path))
             silver_counts["lab_results"] = df_lab.count()
+            lab_issues = quality_rules.evaluate_rules(df_lab, "lab_results", config.VALIDATION_RULES)
+            total_issues += len(lab_issues) if lab_issues else 0
             safe_write(df_lab, silver_dir / "lab_results")
             gold_counts["lab_results"] = df_lab.count()
             safe_write(df_lab, gold_dir / "fact_lab_results")
         else:
-            silver_counts["lab_results"] = 1000
-            quarantined_counts["lab_results"] = 30
-            gold_counts["lab_results"] = 970
+            silver_counts["lab_results"] = 0
+            quarantined_counts["lab_results"] = 0
+            gold_counts["lab_results"] = 0
 
         # Adverse events
         ae_path = bronze_path / f"adverse_events_{study_id}.csv"
         if ae_path.exists():
             df_ae = spark.read.option("header", "true").csv(str(ae_path))
             silver_counts["adverse_events"] = df_ae.count()
+            ae_issues = quality_rules.evaluate_rules(df_ae, "adverse_events", config.VALIDATION_RULES)
+            total_issues += len(ae_issues) if ae_issues else 0
             safe_write(df_ae, silver_dir / "adverse_events")
             gold_counts["adverse_events"] = df_ae.count()
             safe_write(df_ae, gold_dir / "fact_adverse_events")
         else:
-            silver_counts["adverse_events"] = 50
-            quarantined_counts["adverse_events"] = 5
-            gold_counts["adverse_events"] = 45
+            silver_counts["adverse_events"] = 0
+            quarantined_counts["adverse_events"] = 0
+            gold_counts["adverse_events"] = 0
 
         # PRO responses
         pro_path = bronze_path / f"pro_responses_{study_id}.csv"
         if pro_path.exists():
             df_pro = spark.read.option("header", "true").csv(str(pro_path))
             silver_counts["pro_responses"] = df_pro.count()
+            pro_issues = quality_rules.evaluate_rules(df_pro, "pro_responses", config.VALIDATION_RULES)
+            total_issues += len(pro_issues) if pro_issues else 0
             safe_write(df_pro, silver_dir / "pro_responses")
             gold_counts["pro_responses"] = df_pro.count()
             safe_write(df_pro, gold_dir / "fact_pro_responses")
         else:
-            silver_counts["pro_responses"] = 650
-            quarantined_counts["pro_responses"] = 10
-            gold_counts["pro_responses"] = 640
+            silver_counts["pro_responses"] = 0
+            quarantined_counts["pro_responses"] = 0
+            gold_counts["pro_responses"] = 0
 
+        # Ensure quarantined_counts exists (should come from validation rules execution in full version)
         if not quarantined_counts:
-            quarantined_counts = {"subjects": 6, "visits": 20, "lab_results": 30, "adverse_events": 5, "pro_responses": 10}
+            quarantined_counts = {}
 
-        # Compute approximate quality score from actual validation results
-        # Use a simple calculation: ratio of gold/usable to total input
-        total_input = sum(silver_counts.values()) if silver_counts else 1
+        # Compute quality score from actual usable vs input counts
+        total_input = sum(silver_counts.values()) if silver_counts else 0
         total_usable = sum(gold_counts.values()) if gold_counts else 0
         if total_input > 0:
             score = round(100 * total_usable / total_input, 2)
         else:
             score = 0.0
-        # Adjust downward slightly because the synthetic dataset has injected defects
-        score = max(88.0, min(98.0, score - 6.5)) if total_input > 0 else 92.0
+        # Readiness based solely on score and availability of results (simplified)
         readiness = "READY FOR DATA REVIEW" if score >= 95 else ("AT RISK" if score >= 85 else "BLOCKED")
 
         end_time = datetime.datetime.now(datetime.timezone.utc)
