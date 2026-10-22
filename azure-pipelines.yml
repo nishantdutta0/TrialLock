@@ -12,9 +12,9 @@ steps:
       sudo apt-get install -y default-jdk
     displayName: 'Install Java'
   - script: |
-      pip install -r triallock/requirements.txt
+      pip install -r requirements.txt
     displayName: 'Install Python dependencies'
-  - script: pytest triallock/tests -v
+  - script:     pytest tests/ -v
     displayName: 'Run pytest'
-  - script: python -m py_compile triallock/*.py
+  - script:     python -m py_compile app.py triallock/*.py
     displayName: 'Syntax check'
