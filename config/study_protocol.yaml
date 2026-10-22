@@ -1,0 +1,23 @@
+study_id: "IBD-DEMO-001"
+study_title: "Synthetic Gastrointestinal Study - IBD-DEMO-001"
+description: |
+  Synthetic portfolio dataset demonstrating medallion pipeline,
+  data quality validation, and database-lock readiness assessment.
+  Not real patient data. Not a validated GxP system.
+protocol_version: "1.0.0"
+start_date: "2024-01-15"
+end_date: "2024-06-30"
+expected_visit_schedule:
+  - visit_name: "Baseline"
+    visit_window_days: 0
+    required: true
+  - visit_name: "Week 4"
+    visit_window_days: 28
+    required: true
+  - visit_name: "Week 8"
+    visit_window_days: 56
+    required: true
+  - visit_name: "Week 12"
+    visit_window_days: 84
+    required: false
+minimum_quality_score: 95

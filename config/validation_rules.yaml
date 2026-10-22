@@ -1,0 +1,113 @@
+rules:
+  - rule_id: MANDATORY_SUBJECT_ID
+    description: Subject identifier must be present
+    entity: subjects
+    severity: BLOCKER
+    field: subject_id
+    logic: missing
+    quarantine: true
+
+  - rule_id: MANDATORY_STUDY_ID
+    description: Study identifier must be present
+    entity: subjects
+    severity: BLOCKER
+    field: study_id
+    logic: missing
+    quarantine: true
+
+  - rule_id: DUPLICATE_SUBJECT_KEY
+    description: Duplicate business key for subject
+    entity: subjects
+    severity: BLOCKER
+    logic: duplicate_key
+    key_fields: [study_id, subject_id]
+    quarantine: true
+
+  - rule_id: CONSENT_BEFORE_RANDOMIZATION
+    description: Consent date must not follow randomization date
+    entity: subjects
+    severity: HIGH
+    logic: chronological
+    fields: [consent_date, randomization_date]
+    quarantine: false
+
+  - rule_id: MISSING_VISIT_REF_SUBJECT
+    description: Visit must reference an existing subject
+    entity: visits
+    severity: BLOCKER
+    logic: foreign_key
+    field: subject_id
+    reference_entity: subjects
+    reference_key: [study_id, subject_id]
+    quarantine: true
+
+  - rule_id: MISSING_LAB_REF_SUBJECT
+    description: Lab result must reference an existing subject
+    entity: lab_results
+    severity: BLOCKER
+    logic: foreign_key
+    field: subject_id
+    reference_entity: subjects
+    reference_key: [study_id, subject_id]
+    quarantine: true
+
+  - rule_id: LAB_NUMERIC_VALUE
+    description: Laboratory result must parse as a number
+    entity: lab_results
+    severity: BLOCKER
+    logic: numeric_parse
+    field: result_value
+    quarantine: true
+
+  - rule_id: LAB_VALID_UNIT
+    description: Laboratory unit must be recognized
+    entity: lab_results
+    severity: MEDIUM
+    logic: allowed_values
+    field: unit
+    allowed: ["mg/dL", "U/L", "mmol/L", "g/L", "counts/uL", "ng/mL"]
+    quarantine: false
+
+  - rule_id: AE_DATE_SEQUENCE
+    description: Adverse event end date must not precede start date
+    entity: adverse_events
+    severity: HIGH
+    logic: chronological
+    fields: [start_date, end_date]
+    quarantine: false
+
+  - rule_id: PRO_REF_SUBJECT
+    description: Patient-reported outcome must reference existing subject
+    entity: pro_responses
+    severity: BLOCKER
+    logic: foreign_key
+    field: subject_id
+    reference_entity: subjects
+    reference_key: [study_id, subject_id]
+    quarantine: true
+
+  - rule_id: VISIT_STATUS_VALID
+    description: Visit status must be an approved value
+    entity: visits
+    severity: MEDIUM
+    logic: allowed_values
+    field: visit_status
+    allowed: ["Scheduled", "Completed", "Missed", "Cancelled"]
+    quarantine: false
+
+  - rule_id: AE_SEVERITY_VALID
+    description: Adverse event severity must be approved
+    entity: adverse_events
+    severity: MEDIUM
+    logic: allowed_values
+    field: severity
+    allowed: ["Mild", "Moderate", "Severe"]
+    quarantine: false
+
+  - rule_id: REQUIRED_DATES_SUBJECT
+    description: Required dates must parse correctly on subjects
+    entity: subjects
+    severity: BLOCKER
+    logic: date_parse
+    fields: [screening_date, consent_date, randomization_date]
+    quarantine: true

@@ -1,0 +1,129 @@
+subjects:
+  - name: study_id
+    type: string
+    required: true
+  - name: subject_id
+    type: string
+    required: true
+  - name: site_id
+    type: string
+    required: true
+  - name: screening_date
+    type: date
+    required: true
+  - name: consent_date
+    type: date
+    required: true
+  - name: randomization_date
+    type: date
+    required: true
+  - name: treatment_arm
+    type: string
+    required: true
+  - name: subject_status
+    type: string
+    required: true
+
+visits:
+  - name: study_id
+    type: string
+    required: true
+  - name: subject_id
+    type: string
+    required: true
+  - name: visit_id
+    type: string
+    required: true
+  - name: visit_name
+    type: string
+    required: true
+  - name: scheduled_date
+    type: date
+    required: true
+  - name: visit_date
+    type: date
+    required: false
+  - name: visit_status
+    type: string
+    required: true
+
+lab_results:
+  - name: study_id
+    type: string
+    required: true
+  - name: subject_id
+    type: string
+    required: true
+  - name: visit_id
+    type: string
+    required: false
+  - name: sample_id
+    type: string
+    required: true
+  - name: collection_datetime
+    type: datetime
+    required: true
+  - name: test_code
+    type: string
+    required: true
+  - name: result_value
+    type: numeric
+    required: true
+  - name: unit
+    type: string
+    required: true
+  - name: source_lab
+    type: string
+    required: false
+
+adverse_events:
+  - name: study_id
+    type: string
+    required: true
+  - name: subject_id
+    type: string
+    required: true
+  - name: ae_id
+    type: string
+    required: true
+  - name: start_date
+    type: date
+    required: true
+  - name: end_date
+    type: date
+    required: false
+  - name: event_term
+    type: string
+    required: true
+  - name: severity
+    type: string
+    required: true
+  - name: serious
+    type: boolean
+    required: true
+  - name: outcome
+    type: string
+    required: true
+
+pro_responses:
+  - name: study_id
+    type: string
+    required: true
+  - name: subject_id
+    type: string
+    required: true
+  - name: visit_id
+    type: string
+    required: false
+  - name: instrument
+    type: string
+    required: true
+  - name: question_code
+    type: string
+    required: true
+  - name: response_value
+    type: string
+    required: true
+  - name: response_date
+    type: date
+    required: true
