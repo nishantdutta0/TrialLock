@@ -3,6 +3,7 @@ import sqlite3
 from pathlib import Path
 from triallock.spark_session import get_spark
 from triallock.audit import append_audit
+from triallock import config
 import pyarrow.parquet as pq
 
 BASE_DIR = Path(__file__).resolve().parent.parent
