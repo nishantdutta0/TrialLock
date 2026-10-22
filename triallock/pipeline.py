@@ -53,7 +53,7 @@ def run_pipeline(study_id="IBD-DEMO-001"):
             quarantine_sub = dup_sub.select("subject_id", F.lit("DUPLICATE_SUBJECT_KEY").alias("rule_id"), F.lit(study_id).alias("study_id"), F.lit("subjects").alias("entity_type"))
             safe_write(quarantine_sub, quarantine_dir / f"subjects_{run_id}")
             quarantined_counts["subjects"] = quarantine_sub.count()
-            df_sub.write.mode("overwrite").option("header", "true").csv(str(silver_dir / "subjects"))
+            safe_write(df_sub, silver_dir / "subjects")
             clean_sub = df_sub.dropDuplicates(["study_id", "subject_id"])
             gold_counts["subjects"] = clean_sub.count()
             safe_write(clean_sub, gold_dir / "dim_subjects")
