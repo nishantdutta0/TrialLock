@@ -47,3 +47,7 @@ Thumbs.db
 build/
 dist/
 *.egg-info/
+
+# Diagnostic and test outputs
+diagnostics/*_output/
+*_output/
